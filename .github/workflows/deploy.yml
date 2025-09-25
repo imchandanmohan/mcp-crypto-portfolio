@@ -57,16 +57,31 @@ jobs:
   deploy:
    needs: build
    runs-on: ubuntu-latest
+
    steps:
-    # (optional) upload compose files if you haven't already copied them to EC2
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Debug workspace
+      run: |
+        pwd
+        ls -la
+        git status
+        test -f docker-compose.yml && echo "compose OK" || (echo "compose missing" && exit 1)
+        test -f nginx.conf && echo "nginx OK" || (echo "nginx missing" && exit 1)
+
     - name: Upload compose & nginx.conf to EC2
       uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
-        source: "docker-compose.yml,nginx.conf"
-        target: "/home/ubuntu/mcp-crypto-portfolio"
+        source: |
+          docker-compose.yml
+          nginx.conf
+        target: /home/ubuntu/mcp-crypto-portfolio
+        overwrite: true
+        strip_components: 0
 
     - name: Ensure Docker & Compose on EC2
       uses: appleboy/ssh-action@v1.0.3
@@ -76,35 +91,21 @@ jobs:
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
           set -euxo pipefail
-          # Detect distro
-          if [ -f /etc/os-release ]; then . /etc/os-release; fi
-
-          # Install Docker + Compose plugin
-          if command -v docker >/dev/null 2>&1; then
-            echo "Docker already installed"
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y docker.io docker-compose-plugin
           else
-            if command -v apt-get >/dev/null 2>&1 || [ "${ID_LIKE:-}" = "debian" ] || [ "${ID:-}" = "ubuntu" ]; then
-              sudo apt-get update -y
-              sudo apt-get install -y docker.io docker-compose-plugin
-              sudo systemctl enable --now docker
-            else
-              # Amazon Linux / Fedora / RHEL
-              sudo dnf update -y || true
-              sudo dnf install -y docker
-              sudo systemctl enable --now docker
-              # Compose v2 plugin (docker compose). If missing, fallback to docker-compose binary:
-              if ! docker compose version >/dev/null 2>&1; then
-                sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
-                  -o /usr/local/bin/docker-compose
-                sudo chmod +x /usr/local/bin/docker-compose
-                sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
-              fi
+            sudo dnf update -y || true
+            sudo dnf install -y docker || true
+            # optional legacy compose fallback
+            if ! docker compose version >/dev/null 2>&1; then
+              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
+                -o /usr/local/bin/docker-compose
+              sudo chmod +x /usr/local/bin/docker-compose
+              sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
             fi
-            # Add user to docker group (no password sudo)
-            sudo usermod -aG docker $USER || true
           fi
-
-          # Ensure app directory exists
+          sudo systemctl enable --now docker
           mkdir -p /home/ubuntu/mcp-crypto-portfolio
 
     - name: Deploy on EC2 (login, pull image & restart)
@@ -119,18 +120,13 @@ jobs:
           set -euxo pipefail
           cd /home/ubuntu/mcp-crypto-portfolio
           sudo systemctl start docker
-
-          # Login to GHCR (only needed if your package visibility is private)
+          # login only if using a private GHCR package
           if [ -n "${{ secrets.GHCR_PULL_TOKEN || '' }}" ]; then
             echo "${{ secrets.GHCR_PULL_TOKEN }}" | sudo docker login ghcr.io \
               -u "${{ secrets.GHCR_PULL_USERNAME }}" --password-stdin
           fi
-
-          echo "Using IMAGE_NAME: ${IMAGE_NAME}"
           export IMAGE_NAME="${IMAGE_NAME}"
           export TAG=latest
-
-          # Prefer 'docker compose' if available; otherwise fallback to 'docker-compose'
           if docker compose version >/dev/null 2>&1; then
             sudo -E docker compose pull
             sudo -E docker compose up -d
@@ -140,5 +136,4 @@ jobs:
             sudo -E docker-compose up -d
             sudo -E docker-compose ps
           fi
-
           sudo docker image prune -f || true

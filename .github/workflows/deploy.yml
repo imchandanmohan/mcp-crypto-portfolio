@@ -61,7 +61,7 @@ jobs:
       - name: Checkout (needed for scp sources)
         uses: actions/checkout@v4
 
-      - name: Recreate SSH key file from Base64 secret
+      - name: Recreate SSH key file from Base64 secret (with debug)
         id: sshkey
         shell: bash
         env:
@@ -71,11 +71,31 @@ jobs:
           if [[ -z "$KEY_B64" ]]; then
             echo "EC2_SSH_KEY_B64 is empty"; exit 1
           fi
+          
+          # Debug: Show length and first/last few chars
+          echo "Base64 length: ${#KEY_B64}"
+          echo "First 50 chars: ${KEY_B64:0:50}"
+          echo "Last 50 chars: ${KEY_B64: -50}"
+          
+          # Clean and pad
           CLEAN=$(printf '%s' "$KEY_B64" | tr -d '\r\n\t ')
+          echo "Cleaned length: ${#CLEAN}"
+          
           PAD=$(( (4 - ${#CLEAN} % 4) % 4 ))
           CLEAN="${CLEAN}$(printf '=%.0s' $(seq 1 $PAD))"
-          printf '%s' "$CLEAN" | base64 -d > id_ec2 || { echo 'Invalid base64'; exit 1; }
+          echo "Padded length: ${#CLEAN}"
+          
+          # Try to decode
+          printf '%s' "$CLEAN" | base64 -d > id_ec2 || { 
+            echo 'Base64 decode failed'
+            echo "Attempting to decode first 100 chars: ${CLEAN:0:100}"
+            exit 1
+          }
+          
           chmod 600 id_ec2
+          
+          # Verify it looks like a key
+          head -n 1 id_ec2
           echo "key_path=$PWD/id_ec2" >> "$GITHUB_OUTPUT"
 
       - name: Validate workspace files

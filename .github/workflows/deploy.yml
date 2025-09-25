@@ -124,7 +124,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
             IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          with:
+        with:
             host: ${{ secrets.EC2_HOST }}
             username: ${{ secrets.EC2_USER || 'ec2-user' }}
             key: ${{ secrets.EC2_SSH_KEY }}

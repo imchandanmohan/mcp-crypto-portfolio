@@ -106,42 +106,53 @@ jobs:
       - name: Install Docker on EC2 (if needed)
         uses: appleboy/ssh-action@v1.0.3
         with:
-            host: ${{ secrets.EC2_HOST }}
-            username: ${{ secrets.EC2_USER || 'ec2-user' }}
-            key: ${{ secrets.EC2_SSH_KEY }}
-            port: 22
-            script: |
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER || 'ec2-user' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "Installing Docker..."
               sudo dnf update -y
               sudo dnf install -y docker
               sudo systemctl enable --now docker
               sudo usermod -aG docker $USER
+              
+              # Install Docker Compose
               sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
               sudo chmod +x /usr/local/bin/docker-compose
               sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+              
               echo "Docker and Docker Compose installed"
-  
+            else
+              echo "Docker already installed"
+            fi
+
       - name: Deploy application on EC2
         uses: appleboy/ssh-action@v1.0.3
         env:
-            IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
         with:
-            host: ${{ secrets.EC2_HOST }}
-            username: ${{ secrets.EC2_USER || 'ec2-user' }}
-            key: ${{ secrets.EC2_SSH_KEY }}
-            port: 22
-            envs: IMAGE_NAME
-            script: |
-              set -e
-              cd "${{ env.APP_PATH }}"
-              
-              # Ensure Docker is running
-              sudo systemctl start docker
-              
-              echo "Using IMAGE_NAME: $IMAGE_NAME"
-              export TAG=latest
-              
-              # Use sudo for Docker commands to ensure permissions
-              sudo docker-compose pull
-              sudo docker-compose up -d
-              sudo docker image prune -f
-              sudo docker-compose ps
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER || 'ec2-user' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          envs: IMAGE_NAME
+          script: |
+            set -e
+            cd "${{ env.APP_PATH }}"
+            
+            # Ensure Docker is running
+            sudo systemctl start docker
+            
+            echo "Using IMAGE_NAME: $IMAGE_NAME"
+            
+            # Export environment variables for docker-compose
+            export IMAGE_NAME="$IMAGE_NAME"
+            export TAG=latest
+            
+            # Use sudo for Docker commands to ensure permissions
+            sudo -E docker-compose pull
+            sudo -E docker-compose up -d
+            sudo docker image prune -f
+            sudo -E docker-compose ps

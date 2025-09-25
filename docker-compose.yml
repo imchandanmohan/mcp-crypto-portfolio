@@ -1,7 +1,6 @@
-version: "3.9"
 services:
   app:
-    image: ghcr.io/<your-gh-username>/mcp-crypto-portfolio:${TAG:-latest}
+    image: ${IMAGE_NAME}:${TAG:-latest}
     container_name: mcp-crypto-portfolio
     restart: unless-stopped
     env_file:

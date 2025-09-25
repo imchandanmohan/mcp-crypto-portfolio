@@ -11,7 +11,7 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/mcp-crypto-portfolio
-  APP_PATH: ${{ secrets.EC2_PATH || '/home/ubuntu/mcp-crypto-portfolio' }}
+  APP_PATH: /home/ubuntu/mcp-crypto-portfolio
 
 jobs:
   build:
@@ -57,45 +57,69 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/mcp-crypto-portfolio
+      APP_PATH: /home/ubuntu/mcp-crypto-portfolio
     steps:
       - name: Checkout (needed for scp sources)
         uses: actions/checkout@v4
 
-      - name: Show workspace contents
-        run: |
-          pwd
-          ls -la
-          # Ensure the file names/paths match your repo
-          test -f docker-compose.yml && echo "found docker-compose.yml" || (echo "missing docker-compose.yml" && exit 1)
-          test -f nginx.conf && echo "found nginx.conf" || (echo "missing nginx.conf" && exit 1)
-          
+      - name: Login to GHCR for pulling
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT || github.token }}
+
       - name: Recreate SSH key file from Base64 secret
         id: sshkey
+        shell: bash
         run: |
+          set -e
+          if [ -z "${{ secrets.EC2_SSH_KEY_B64 }}" ]; then
+            echo "EC2_SSH_KEY_B64 is empty or not set"
+            exit 1
+          fi
+          
+          # Decode base64 key
           echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > id_ec2
           chmod 600 id_ec2
+          
+          # Verify key format
+          if ! head -n1 id_ec2 | grep -q "BEGIN.*PRIVATE KEY"; then
+            echo "Invalid SSH key format"
+            cat id_ec2 | head -5
+            exit 1
+          fi
+          
+          echo "SSH key created successfully"
           echo "key_path=$PWD/id_ec2" >> $GITHUB_OUTPUT
+
+      - name: Validate workspace files
+        run: |
+          ls -la
+          test -f docker-compose.yml || (echo "missing docker-compose.yml" && exit 1)
+          test -f nginx.conf || (echo "missing nginx.conf" && exit 1)
 
       - name: Ensure target dir exists on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key_path: ${{ steps.sshkey.outputs.key_path }}
+          port: 22
           script: |
             set -e
             mkdir -p "${{ env.APP_PATH }}"
             ls -la "${{ env.APP_PATH }}"
 
-            
       - name: Upload compose & nginx.conf to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key_path: ${{ steps.sshkey.outputs.key_path }}
           port: 22
-          # Be explicit with ./ so globs resolve from workspace
           source: "./docker-compose.yml,./nginx.conf"
           target: ${{ env.APP_PATH }}
           overwrite: true
@@ -108,22 +132,35 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key_path: ${{ steps.sshkey.outputs.key_path }}
+          port: 22
           script: |
             set -e
             cd "${{ env.APP_PATH }}"
-
+            
+            # Install Docker if not present
             if ! command -v docker >/dev/null 2>&1; then
               sudo apt-get update
               sudo apt-get install -y docker.io docker-compose-plugin
               sudo usermod -aG docker $USER || true
+              # Note: User needs to log out/in for group changes to take effect
+              # For immediate effect in this session:
+              sudo systemctl start docker
+              sudo systemctl enable docker
             fi
-
-            echo "Compose files in $(pwd):"
-            ls -la
-
+            
+            # Ensure Docker is running
+            sudo systemctl start docker || true
+            
+            # Login to GHCR (using the same credentials)
+            echo "${{ secrets.GHCR_PAT || github.token }}" | sudo docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            
+            echo "Deploying image ${{ env.IMAGE_NAME }}:latest"
+            export IMAGE_NAME="${{ env.IMAGE_NAME }}"
             export TAG=latest
-            docker compose pull
-            docker compose up -d
-            docker image prune -f
-            docker compose ps
+            
+            # Pull and deploy
+            sudo docker compose pull
+            sudo docker compose up -d
+            sudo docker image prune -f
+            sudo docker compose ps

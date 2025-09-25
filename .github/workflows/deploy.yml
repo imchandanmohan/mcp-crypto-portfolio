@@ -68,6 +68,13 @@ jobs:
           # Ensure the file names/paths match your repo
           test -f docker-compose.yml && echo "found docker-compose.yml" || (echo "missing docker-compose.yml" && exit 1)
           test -f nginx.conf && echo "found nginx.conf" || (echo "missing nginx.conf" && exit 1)
+          
+      - name: Recreate SSH key file from Base64 secret
+        id: sshkey
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > id_ec2
+          chmod 600 id_ec2
+          echo "key_path=$PWD/id_ec2" >> $GITHUB_OUTPUT
 
       - name: Ensure target dir exists on EC2
         uses: appleboy/ssh-action@v1.0.3
@@ -80,6 +87,7 @@ jobs:
             mkdir -p "${{ env.APP_PATH }}"
             ls -la "${{ env.APP_PATH }}"
 
+            
       - name: Upload compose & nginx.conf to EC2
         uses: appleboy/scp-action@v0.1.7
         with:

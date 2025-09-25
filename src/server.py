@@ -1,7 +1,7 @@
 import os, datetime as dt
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
 
 from .kucoin_client import KucoinClient, KucoinBalance
 from .notion_client import NotionClient
@@ -34,7 +34,7 @@ class ReportOut(BaseModel):
     notion_urls: list[str] = []
 
 # ---------- Tool: health ----------
-@mcp.tool
+@mcp.tool()
 def health() -> HealthOut:
     return HealthOut(ok=True, version="0.2.0")
 
@@ -54,7 +54,7 @@ def _notion() -> NotionClient:
     )
 
 # ---------- Tool: get_balances ----------
-@mcp.tool
+@mcp.tool()
 def get_balances() -> GetBalancesOut:
     """
     Fetch KuCoin balances from both 'main' and 'trade' accounts.
@@ -67,7 +67,7 @@ def get_balances() -> GetBalancesOut:
     return GetBalancesOut(as_of=now, balances=main + trade)
 
 # ---------- Tool: upsert_holdings ----------
-@mcp.tool
+@mcp.tool()
 def upsert_holdings(args: UpsertHoldingsIn) -> UpsertHoldingsOut:
     """
     Aggregate balances and write one row per (asset, account, date) to Notion.
@@ -99,7 +99,7 @@ def upsert_holdings(args: UpsertHoldingsIn) -> UpsertHoldingsOut:
     return UpsertHoldingsOut(upserted=upserted)
 
 # ---------- Tool: portfolio_report ----------
-@mcp.tool
+@mcp.tool()
 def portfolio_report() -> ReportOut:
     """
     Simple first-pass suggestions: flag concentrated positions, dust, and stablecoin mix.
@@ -137,4 +137,4 @@ if __name__ == "__main__":
     host = os.getenv("MCP_HOST", "127.0.0.1")
     port = int(os.getenv("MCP_PORT", "3333"))
     print(f"[mcp] HTTP at http://{host}:{port}/mcp")
-    mcp.run(transport="http", host=host, port=port)
+    mcp.run_http(host=host, port=port)  # type: ignore[attr-defined]

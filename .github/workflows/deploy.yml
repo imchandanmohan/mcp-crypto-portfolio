@@ -103,73 +103,45 @@ jobs:
           overwrite: true
           debug: true
 
-      - name: Deploy on EC2 (pull image & restart)
+      - name: Install Docker on EC2 (if needed)
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER || 'ec2-user' }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: 22
-          envs: IMAGE_NAME
-          script: |
-            set -e
-            cd "${{ env.APP_PATH }}"
-
-            # Install Docker and Docker Compose if not present
-            if ! command -v docker >/dev/null 2>&1; then
-              echo "Installing Docker..."
-              # Amazon Linux 2023
+            host: ${{ secrets.EC2_HOST }}
+            username: ${{ secrets.EC2_USER || 'ec2-user' }}
+            key: ${{ secrets.EC2_SSH_KEY }}
+            port: 22
+            script: |
               sudo dnf update -y
               sudo dnf install -y docker
               sudo systemctl enable --now docker
-              sudo usermod -aG docker $USER || true
-              
-              # Install Docker Compose as a separate binary
+              sudo usermod -aG docker $USER
               sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
               sudo chmod +x /usr/local/bin/docker-compose
-              
-              # Create symlink for docker compose command
               sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
-              
               echo "Docker and Docker Compose installed"
-            fi
-
-            # Ensure Docker daemon is running
-            if ! sudo systemctl is-active --quiet docker; then
-              echo "Starting Docker daemon..."
+  
+      - name: Deploy application on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+            IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          with:
+            host: ${{ secrets.EC2_HOST }}
+            username: ${{ secrets.EC2_USER || 'ec2-user' }}
+            key: ${{ secrets.EC2_SSH_KEY }}
+            port: 22
+            envs: IMAGE_NAME
+            script: |
+              set -e
+              cd "${{ env.APP_PATH }}"
+              
+              # Ensure Docker is running
               sudo systemctl start docker
-            fi
-
-            # Wait for Docker daemon to be ready
-            echo "Waiting for Docker daemon to be ready..."
-            for i in {1..30}; do
-              if sudo docker info >/dev/null 2>&1; then
-                echo "Docker daemon is ready"
-                break
-              fi
-              echo "Waiting for Docker daemon... ($i/30)"
-              sleep 2
-            done
-
-            # Verify Docker Compose is available
-            if command -v docker-compose >/dev/null 2>&1; then
-              COMPOSE_CMD="sudo docker-compose"
-            elif sudo docker compose version >/dev/null 2>&1; then
-              COMPOSE_CMD="sudo docker compose"
-            else
-              echo "Docker Compose not found, installing..."
-              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-              sudo chmod +x /usr/local/bin/docker-compose
-              COMPOSE_CMD="sudo docker-compose"
-            fi
-
-            echo "Using IMAGE_NAME: $IMAGE_NAME"
-            echo "Using Compose command: $COMPOSE_CMD"
-            
-            export TAG=latest
-            $COMPOSE_CMD pull
-            $COMPOSE_CMD up -d
-            sudo docker image prune -f
-            $COMPOSE_CMD ps
+              
+              echo "Using IMAGE_NAME: $IMAGE_NAME"
+              export TAG=latest
+              
+              # Use sudo for Docker commands to ensure permissions
+              sudo docker-compose pull
+              sudo docker-compose up -d
+              sudo docker image prune -f
+              sudo docker-compose ps

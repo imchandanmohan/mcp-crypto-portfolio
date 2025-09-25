@@ -8,8 +8,8 @@ services:
       PYTHONPATH: "/app"
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "3333"
-    # Run the server.py file directly
-    command: ["python", "src/server.py"]
+    # Run as a module to handle relative imports
+    command: ["python", "-m", "src.server"]
     networks:
       web:
         aliases: [app]

@@ -61,31 +61,17 @@ jobs:
       - name: Checkout (needed for scp sources)
         uses: actions/checkout@v4
 
-      - name: Setup SSH key file from secret
-        id: sshkey
-        shell: bash
+      - name: Test SSH key format
         env:
           SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          set -e
           if [[ -z "$SSH_KEY" ]]; then
             echo "EC2_SSH_KEY is empty"; exit 1
           fi
-          # Create SSH key in /tmp with proper permissions
-          KEY_FILE="/tmp/id_ec2_$$"
-          printf '%s\n' "$SSH_KEY" > "$KEY_FILE"
-          chmod 600 "$KEY_FILE"
-          ls -la "$KEY_FILE"
-          echo "key_path=$KEY_FILE" >> "$GITHUB_OUTPUT"
-
-      - name: Debug SSH key
-        run: |
-          echo "SSH key file location: ${{ steps.sshkey.outputs.key_path }}"
-          ls -la "${{ steps.sshkey.outputs.key_path }}"
-          head -n 1 "${{ steps.sshkey.outputs.key_path }}"
-          tail -n 1 "${{ steps.sshkey.outputs.key_path }}"
-          # Test SSH key format
-          ssh-keygen -l -f "${{ steps.sshkey.outputs.key_path }}" || echo "Invalid SSH key format"
+          echo "SSH key starts with:"
+          echo "$SSH_KEY" | head -n 1
+          echo "SSH key ends with:"
+          echo "$SSH_KEY" | tail -n 1
 
       - name: Validate workspace files
         run: |
@@ -98,7 +84,7 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER || 'ec2-user' }}
-          key_path: ${{ steps.sshkey.outputs.key_path }}
+          key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           script: |
             set -e
@@ -110,7 +96,7 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER || 'ec2-user' }}
-          key_path: ${{ steps.sshkey.outputs.key_path }}
+          key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           source: "./docker-compose.yml,./nginx.conf"
           target: ${{ env.APP_PATH }}
@@ -122,7 +108,7 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER || 'ec2-user' }}
-          key_path: ${{ steps.sshkey.outputs.key_path }}
+          key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           script: |
             set -e

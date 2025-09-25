@@ -137,4 +137,5 @@ if __name__ == "__main__":
     host = os.getenv("MCP_HOST", "127.0.0.1")
     port = int(os.getenv("MCP_PORT", "3333"))
     print(f"[mcp] HTTP at http://{host}:{port}/mcp")
-    mcp.run(transport="http",host=host, port=port)  # type: ignore[attr-defined]
+    #mcp.run(transport="http",host=host, port=port)  # type: ignore[attr-defined]
+    pass

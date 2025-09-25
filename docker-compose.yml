@@ -1,15 +1,21 @@
 services:
   app:
-    image: ${IMAGE_NAME}:${TAG:-latest}
-    container_name: mcp-crypto-portfolio
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      MCP_HOST: "0.0.0.0"
-      MCP_PORT: "3333"
-    networks: [web]
-    expose: ["3333"]
+      image: ghcr.io/imchandanmohan/mcp-crypto-portfolio:latest
+      container_name: mcp-crypto-portfolio
+      restart: unless-stopped
+      env_file:
+        - .env
+      environment:
+        PYTHONPATH: "/app"          # so 'src.*' imports work
+        MCP_HOST: "0.0.0.0"
+        MCP_PORT: "3333"
+      command: ["python", "-m", "fastmcp.cli", "run", "src.server",
+                "--transport", "http",
+                "--host", "0.0.0.0", "--port", "3333"]
+      networks:
+        web:
+          aliases: [app]            # let nginx resolve 'app'
+      expose: ["3333"]
 
   nginx:
     image: nginx:1.27-alpine

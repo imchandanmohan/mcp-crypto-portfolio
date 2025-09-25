@@ -151,6 +151,8 @@ def portfolio_report() -> ReportOut:
 
 # We start HTTP via the FastMCP CLI in Docker; don't start here.
 if __name__ == "__main__":
-    # Optional: local dev (stdio) only.
-    # mcp.run("stdio")
-    pass
+    import os
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("MCP_PORT", "3333"))
+    print(f"[mcp] HTTP at http://{host}:{port}/mcp")
+    mcp.run("http", host=host,port=port)

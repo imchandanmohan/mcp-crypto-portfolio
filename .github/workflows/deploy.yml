@@ -55,102 +55,90 @@ jobs:
           docker push $IMAGE_NAME:latest
 
   deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout (needed for scp sources)
-        uses: actions/checkout@v4
+   needs: build
+   runs-on: ubuntu-latest
+   steps:
+    # (optional) upload compose files if you haven't already copied them to EC2
+    - name: Upload compose & nginx.conf to EC2
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        source: "docker-compose.yml,nginx.conf"
+        target: "/home/ubuntu/mcp-crypto-portfolio"
 
-      - name: Test SSH key format
-        env:
-          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-        run: |
-          if [[ -z "$SSH_KEY" ]]; then
-            echo "EC2_SSH_KEY is empty"; exit 1
-          fi
-          echo "SSH key starts with:"
-          echo "$SSH_KEY" | head -n 1
-          echo "SSH key ends with:"
-          echo "$SSH_KEY" | tail -n 1
+    - name: Ensure Docker & Compose on EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          set -euxo pipefail
+          # Detect distro
+          if [ -f /etc/os-release ]; then . /etc/os-release; fi
 
-      - name: Validate workspace files
-        run: |
-          ls -la
-          test -f docker-compose.yml || (echo "missing docker-compose.yml" && exit 1)
-          test -f nginx.conf || (echo "missing nginx.conf" && exit 1)
-
-      - name: Ensure target dir exists on EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER || 'ec2-user' }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: 22
-          script: |
-            set -e
-            mkdir -p "${{ env.APP_PATH }}"
-            ls -la "${{ env.APP_PATH }}"
-
-      - name: Upload compose & nginx.conf to EC2
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER || 'ec2-user' }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: 22
-          source: "./docker-compose.yml,./nginx.conf"
-          target: ${{ env.APP_PATH }}
-          overwrite: true
-          debug: true
-
-      - name: Install Docker on EC2 (if needed)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER || 'ec2-user' }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: 22
-          script: |
-            if ! command -v docker >/dev/null 2>&1; then
-              echo "Installing Docker..."
-              sudo dnf update -y
+          # Install Docker + Compose plugin
+          if command -v docker >/dev/null 2>&1; then
+            echo "Docker already installed"
+          else
+            if command -v apt-get >/dev/null 2>&1 || [ "${ID_LIKE:-}" = "debian" ] || [ "${ID:-}" = "ubuntu" ]; then
+              sudo apt-get update -y
+              sudo apt-get install -y docker.io docker-compose-plugin
+              sudo systemctl enable --now docker
+            else
+              # Amazon Linux / Fedora / RHEL
+              sudo dnf update -y || true
               sudo dnf install -y docker
               sudo systemctl enable --now docker
-              sudo usermod -aG docker $USER
-              
-              # Install Docker Compose
-              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-              sudo chmod +x /usr/local/bin/docker-compose
-              sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
-              
-              echo "Docker and Docker Compose installed"
-            else
-              echo "Docker already installed"
+              # Compose v2 plugin (docker compose). If missing, fallback to docker-compose binary:
+              if ! docker compose version >/dev/null 2>&1; then
+                sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
+                  -o /usr/local/bin/docker-compose
+                sudo chmod +x /usr/local/bin/docker-compose
+                sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+              fi
             fi
+            # Add user to docker group (no password sudo)
+            sudo usermod -aG docker $USER || true
+          fi
 
-            - name: Deploy on EC2 (login, pull image & restart)
-            uses: appleboy/ssh-action@v1.0.3
-            with:
-              host: ${{ secrets.EC2_HOST }}
-              username: ${{ secrets.EC2_USER }}
-              key: ${{ secrets.EC2_SSH_KEY }}
-              script: |
-                set -e
-                cd "/home/ubuntu/mcp-crypto-portfolio"  # or your $APP_PATH
-                # Ensure Docker is up
-                sudo systemctl start docker
-          
-                echo "Logging into GHCR..."
-                echo "${{ secrets.GHCR_PULL_TOKEN }}" | sudo docker login ghcr.io \
-                  -u "${{ secrets.GHCR_PULL_USERNAME }}" --password-stdin
-          
-                echo "Using IMAGE_NAME: $IMAGE_NAME"
-                export IMAGE_NAME="$IMAGE_NAME"
-                export TAG=latest
-          
-                # If you have docker-compose plugin, prefer 'docker compose'
-                sudo -E docker compose pull
-                sudo -E docker compose up -d
-                sudo docker image prune -f
-                sudo -E docker compose ps
-          
+          # Ensure app directory exists
+          mkdir -p /home/ubuntu/mcp-crypto-portfolio
+
+    - name: Deploy on EC2 (login, pull image & restart)
+      uses: appleboy/ssh-action@v1.0.3
+      env:
+        IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/mcp-crypto-portfolio
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          set -euxo pipefail
+          cd /home/ubuntu/mcp-crypto-portfolio
+          sudo systemctl start docker
+
+          # Login to GHCR (only needed if your package visibility is private)
+          if [ -n "${{ secrets.GHCR_PULL_TOKEN || '' }}" ]; then
+            echo "${{ secrets.GHCR_PULL_TOKEN }}" | sudo docker login ghcr.io \
+              -u "${{ secrets.GHCR_PULL_USERNAME }}" --password-stdin
+          fi
+
+          echo "Using IMAGE_NAME: ${IMAGE_NAME}"
+          export IMAGE_NAME="${IMAGE_NAME}"
+          export TAG=latest
+
+          # Prefer 'docker compose' if available; otherwise fallback to 'docker-compose'
+          if docker compose version >/dev/null 2>&1; then
+            sudo -E docker compose pull
+            sudo -E docker compose up -d
+            sudo -E docker compose ps
+          else
+            sudo -E docker-compose pull
+            sudo -E docker-compose up -d
+            sudo -E docker-compose ps
+          fi
+
+          sudo docker image prune -f || true

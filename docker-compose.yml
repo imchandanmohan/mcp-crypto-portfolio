@@ -1,21 +1,19 @@
 services:
   app:
-      image: ghcr.io/imchandanmohan/mcp-crypto-portfolio:latest
-      container_name: mcp-crypto-portfolio
-      restart: unless-stopped
-      env_file: [.env]
-      environment:
-        PYTHONPATH: "/app"
-        MCP_HOST: "0.0.0.0"
-        MCP_PORT: "3333"
-      # Use the CLI via module (works even if PATH doesn't have the scripth)
-      command: ["python", "-m", "fastmcp", "run", "src.server",
-                "--transport", "http",
-                "--host", "0.0.0.0", "--port", "3333"]
-      networks:
-        web:
-          aliases: [app]
-      expose: ["3333"]
+    image: ghcr.io/imchandanmohan/mcp-crypto-portfolio:latest
+    container_name: mcp-crypto-portfolio
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      PYTHONPATH: "/app"
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "3333"
+    # Run the server.py file directly
+    command: ["python", "src/server.py"]
+    networks:
+      web:
+        aliases: [app]
+    expose: ["3333"]
 
   nginx:
     image: nginx:1.27-alpine

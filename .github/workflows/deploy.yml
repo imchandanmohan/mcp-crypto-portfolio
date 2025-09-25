@@ -11,7 +11,7 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/mcp-crypto-portfolio
-  APP_PATH: /home/ubuntu/mcp-crypto-portfolio
+  APP_PATH: /home/ec2-user/mcp-crypto-portfolio
 
 jobs:
   build:
@@ -37,7 +37,6 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          # If you created a PAT, it will be secrets.GHCR_PAT; otherwise fallback to GITHUB_TOKEN
           password: ${{ secrets.GHCR_PAT || github.token }}
 
       - name: Set up Buildx
@@ -64,10 +63,20 @@ jobs:
 
       - name: Recreate SSH key file from Base64 secret
         id: sshkey
+        shell: bash
+        env:
+          KEY_B64: ${{ secrets.EC2_SSH_KEY_B64 }}
         run: |
-          echo "${{ secrets.EC2_SSH_KEY }}" | base64 -d > id_ec2
+          set -e
+          if [[ -z "$KEY_B64" ]]; then
+            echo "EC2_SSH_KEY_B64 is empty"; exit 1
+          fi
+          CLEAN=$(printf '%s' "$KEY_B64" | tr -d '\r\n\t ')
+          PAD=$(( (4 - ${#CLEAN} % 4) % 4 ))
+          CLEAN="${CLEAN}$(printf '=%.0s' $(seq 1 $PAD))"
+          printf '%s' "$CLEAN" | base64 -d > id_ec2 || { echo 'Invalid base64'; exit 1; }
           chmod 600 id_ec2
-          echo "key_path=$PWD/id_ec2" >> $GITHUB_OUTPUT
+          echo "key_path=$PWD/id_ec2" >> "$GITHUB_OUTPUT"
 
       - name: Validate workspace files
         run: |
@@ -78,8 +87,8 @@ jobs:
       - name: Ensure target dir exists on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}       # e.g., 52.58.x.x (no scheme)
-          username: ${{ secrets.EC2_USER }}   # e.g., ubuntu
+          host: ${{ secrets.EC2_HOST }}       # e.g., 52.58.x.x (Elastic IP only)
+          username: ${{ secrets.EC2_USER || 'ec2-user' }}
           key_path: ${{ steps.sshkey.outputs.key_path }}
           port: 22
           script: |
@@ -91,32 +100,34 @@ jobs:
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
+          username: ${{ secrets.EC2_USER || 'ec2-user' }}
           key_path: ${{ steps.sshkey.outputs.key_path }}
           port: 22
           source: "./docker-compose.yml,./nginx.conf"
           target: ${{ env.APP_PATH }}
           overwrite: true
-          strip_components: 0
-          timeout: 120s
           debug: true
 
       - name: Deploy on EC2 (pull image & restart)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
+          username: ${{ secrets.EC2_USER || 'ec2-user' }}
           key_path: ${{ steps.sshkey.outputs.key_path }}
           port: 22
           script: |
             set -e
             cd "${{ env.APP_PATH }}"
+
             if ! command -v docker >/dev/null 2>&1; then
-              sudo apt-get update
-              sudo apt-get install -y docker.io docker-compose-plugin
+              # Amazon Linux 2023
+              sudo dnf update -y
+              sudo dnf install -y docker docker-compose-plugin
+              sudo systemctl enable --now docker
               sudo usermod -aG docker $USER || true
             fi
-            echo "Deploying image $IMAGE_NAME:latest"
+
+            echo "Deploying $IMAGE_NAME:latest"
             export TAG=latest
             docker compose pull
             docker compose up -d

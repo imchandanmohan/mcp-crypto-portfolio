@@ -1,6 +1,6 @@
 services:
   app:
-    image: ${IMAGE_NAME}:${TAG:-latest}
+    image: ghcr.io/<your-user>/mcp-crypto-portfolio:${TAG:-latest}
     container_name: mcp-crypto-portfolio
     restart: unless-stopped
     env_file:

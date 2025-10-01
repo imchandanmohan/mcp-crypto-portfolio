@@ -1,10 +1,14 @@
 # 🚀 MCP Crypto Portfolio
+<img width="1148" height="468" alt="HC" src="https://github.com/user-attachments/assets/33301dfc-70a5-4e89-b371-f156d5c73e6a" />
 
 [![CI/CD](https://github.com/yourusername/mcp-crypto-portfolio/workflows/ci-cd/badge.svg)](https://github.com/yourusername/mcp-crypto-portfolio/actions)
 [![Security](https://img.shields.io/badge/security-production--grade-green)](https://github.com/yourusername/mcp-crypto-portfolio#security-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Enterprise-grade MCP server** that seamlessly connects Claude AI to your **KuCoin** portfolio and **Notion** workspace for intelligent crypto portfolio management, automated reporting, and risk analysis.
+
+<img width="1154" height="719" alt="Portfolio" src="https://github.com/user-attachments/assets/b677df93-7453-496a-a7f2-73e563808a17" />
+
 
 Built for **FAANG-scale reliability** with Docker orchestration, zero-downtime deployments, comprehensive observability, and battle-tested security practices.
 
